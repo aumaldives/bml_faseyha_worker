@@ -1,0 +1,452 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Faseyha — BML Worker</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<script>
+  tailwind.config = { darkMode: 'class', theme: { extend: { fontFamily: {
+    mono: ['ui-monospace', 'Cascadia Code', 'Consolas', 'monospace'] } } } };
+</script>
+</head>
+<body class="bg-slate-900 text-slate-200 leading-relaxed min-h-screen antialiased">
+<div class="max-w-3xl mx-auto px-4 pt-8 pb-20">
+  <div class="flex justify-between items-center flex-wrap gap-3 mb-6">
+    <div>
+      <h1 class="text-sky-400 text-2xl font-bold">Faseyha &middot; BML Worker</h1>
+      <p class="text-slate-400 text-sm mt-1">Server-side login &middot; balance watcher &middot; callbacks</p>
+    </div>
+    <div id="topActions" class="hidden flex items-center gap-2">
+      <a href="/faseyha/logs" class="bg-slate-600 hover:bg-slate-500 text-white text-sm font-semibold px-4 py-2 rounded-lg">Realtime logs</a>
+      <button id="btnChangePw" type="button" class="bg-slate-600 hover:bg-slate-500 text-white text-sm font-semibold px-4 py-2 rounded-lg">Change password</button>
+      <button id="btnAppLogout" type="button" class="bg-slate-600 hover:bg-slate-500 text-white text-sm font-semibold px-4 py-2 rounded-lg">Log out</button>
+    </div>
+  </div>
+
+  <!-- ============ GATE: first-run setup ============ -->
+  <div id="setupCard" class="hidden bg-slate-800 border border-slate-700 rounded-xl p-6 mb-5">
+    <h2 class="text-base font-semibold mb-2">Set an app password</h2>
+    <p class="text-slate-300 text-sm">This protects /faseyha and its settings. Stored as a salted hash on the server.</p>
+    <label class="block text-xs uppercase tracking-wider text-slate-400 mt-4 mb-1">New password</label>
+    <input id="setupPw" type="password" placeholder="at least 4 characters" class="w-full px-3 py-2 rounded-lg border border-slate-700 bg-slate-950 text-slate-200 text-sm font-mono focus:outline-none focus:border-sky-400">
+    <button id="btnSetup" type="button" class="bg-blue-600 hover:bg-blue-700 text-white font-semibold text-sm px-5 py-2 rounded-lg mt-4">Create &amp; sign in</button>
+    <div id="setupMsg" class="text-sm mt-2 min-h-[1.1rem]"></div>
+  </div>
+
+  <!-- ============ GATE: login ============ -->
+  <div id="loginCard" class="hidden bg-slate-800 border border-slate-700 rounded-xl p-6 mb-5">
+    <h2 class="text-base font-semibold mb-2">Sign in</h2>
+    <label class="block text-xs uppercase tracking-wider text-slate-400 mt-2 mb-1">App password</label>
+    <input id="loginPw" type="password" placeholder="app password" class="w-full px-3 py-2 rounded-lg border border-slate-700 bg-slate-950 text-slate-200 text-sm font-mono focus:outline-none focus:border-sky-400">
+    <button id="btnLogin" type="button" class="bg-blue-600 hover:bg-blue-700 text-white font-semibold text-sm px-5 py-2 rounded-lg mt-4">Sign in</button>
+    <div id="loginMsg" class="text-sm mt-2 min-h-[1.1rem]"></div>
+  </div>
+
+  <!-- ============ APP ============ -->
+  <div id="appView" class="hidden">
+
+    <!-- BML session -->
+    <div class="bg-slate-800 border border-slate-700 rounded-xl p-6 mb-5">
+      <h2 class="text-base font-semibold mb-2 flex items-center gap-2">BML session
+        <span id="bmlPill" class="inline-block px-2.5 py-0.5 rounded-full text-xs font-bold bg-rose-900 text-rose-300">checking…</span></h2>
+      <div id="bmlConnected" class="hidden">
+        <p id="bmlExpiry" class="text-slate-400 text-sm"></p>
+        <div class="flex gap-2">
+          <button id="btnPollNow" type="button" class="bg-slate-600 hover:bg-slate-500 text-white text-sm font-semibold px-4 py-2 rounded-lg mt-3">Poll now</button>
+          <button id="btnBmlLogout" type="button" class="bg-red-700 hover:bg-red-800 text-white text-sm font-semibold px-4 py-2 rounded-lg mt-3">Disconnect BML</button>
+        </div>
+      </div>
+      <div id="bmlDisconnected" class="hidden">
+        <p class="text-slate-300 text-sm my-1">Not authenticated. Open the BML login, sign in, then paste the redirected callback URL below to save the session on this server.</p>
+        <p class="my-2"><a id="loginLink" href="#" target="_blank" rel="noopener" class="inline-block bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2 rounded-lg font-semibold text-sm">Open BML Login &#8599;</a></p>
+        <label class="block text-xs uppercase tracking-wider text-slate-400 mt-3 mb-1">Callback URL or raw code</label>
+        <textarea id="cbUrl" rows="2" placeholder="https://app.bankofmaldives.com.mv/oauth/mobile-callback?code=..." class="w-full px-3 py-2 rounded-lg border border-slate-700 bg-slate-950 text-slate-200 text-sm font-mono focus:outline-none focus:border-sky-400 resize-y break-all"></textarea>
+        <button id="btnBmlLogin" type="button" class="bg-blue-600 hover:bg-blue-700 text-white font-semibold text-sm px-5 py-2 rounded-lg mt-3">Save BML login</button>
+      </div>
+      <div id="bmlMsg" class="text-sm mt-2 min-h-[1.1rem]"></div>
+    </div>
+
+    <!-- Accounts -->
+    <div class="bg-slate-800 border border-slate-700 rounded-xl p-6 mb-5">
+      <h2 class="text-base font-semibold mb-2">Accounts <span id="lastPoll" class="text-slate-400 text-sm font-normal"></span></h2>
+      <label class="flex items-center gap-2 mt-3 text-sm text-slate-300"><input type="checkbox" id="s_trackall" class="accent-sky-500 w-4 h-4"> Track all matching accounts (prefix) — including ones added later</label>
+      <div id="acctWrap" class="mt-3"><p class="text-slate-400 text-sm">No poll yet.</p></div>
+      <button id="btnSaveTracked" type="button" class="bg-blue-600 hover:bg-blue-700 text-white font-semibold text-sm px-5 py-2 rounded-lg mt-4">Save tracked selection</button>
+      <div id="trackedMsg" class="text-sm mt-2 min-h-[1.1rem]"></div>
+    </div>
+
+    <!-- Force-update API -->
+    <div class="bg-slate-800 border border-slate-700 rounded-xl p-6 mb-5">
+      <h2 class="text-base font-semibold mb-1">Force-update API</h2>
+      <p class="text-slate-300 text-sm">Force-fetch an account's history and push it to the configured callbacks <strong>even when no balance change was detected</strong>. The <em>Force</em> buttons above call this; you can also call it directly. It's firewall-gated (no app password) and uses the saved BML session, so the account id is resolved server-side from the number.</p>
+      <pre class="bg-slate-950 border border-slate-800 rounded-lg p-3 mt-3 text-xs font-mono text-sky-300 overflow-x-auto whitespace-pre-wrap break-all">GET | POST  <span class="apiBase"></span>/api/forceupdate/{accountNumber}</pre>
+      <p class="text-slate-400 text-xs mt-3">Example</p>
+      <pre class="bg-slate-950 border border-slate-800 rounded-lg p-3 mt-1 text-xs font-mono text-slate-300 overflow-x-auto whitespace-pre-wrap break-all">curl -X POST <span class="apiBase"></span>/api/forceupdate/7730000175583</pre>
+      <p class="text-slate-400 text-xs mt-3">Response (includes the fetched history)</p>
+      <pre class="bg-slate-950 border border-slate-800 rounded-lg p-3 mt-1 text-xs font-mono text-slate-300 overflow-x-auto whitespace-pre-wrap break-all">{ "ok": true, "account": "7730000175583", "id": "…", "transactions": 12,
+  "callbacks_enabled": 1, "posted_ok": true,
+  "history": [ { "id": "FT…", "amount": 100, "narrative3": "…", … }, … ] }</pre>
+    </div>
+
+    <!-- Settings -->
+    <div class="bg-slate-800 border border-slate-700 rounded-xl p-6 mb-5">
+      <h2 class="text-base font-semibold mb-2">Settings</h2>
+      <div class="flex flex-wrap gap-3">
+        <div class="flex-1 min-w-[200px]"><label class="block text-xs uppercase tracking-wider text-slate-400 mt-3 mb-1">Dashboard poll interval (s)</label><input id="s_poll" type="number" min="5" class="w-full px-3 py-2 rounded-lg border border-slate-700 bg-slate-950 text-slate-200 text-sm font-mono focus:outline-none focus:border-sky-400"></div>
+        <div class="flex-1 min-w-[200px]"><label class="block text-xs uppercase tracking-wider text-slate-400 mt-3 mb-1">Notifications poll interval (s)</label><input id="s_notif_int" type="number" min="5" class="w-full px-3 py-2 rounded-lg border border-slate-700 bg-slate-950 text-slate-200 text-sm font-mono focus:outline-none focus:border-sky-400"></div>
+        <div class="flex-1 min-w-[200px]"><label class="block text-xs uppercase tracking-wider text-slate-400 mt-3 mb-1">Account prefix</label><input id="s_prefix" class="w-full px-3 py-2 rounded-lg border border-slate-700 bg-slate-950 text-slate-200 text-sm font-mono focus:outline-none focus:border-sky-400"></div>
+        <div class="flex-1 min-w-[200px]"><label class="block text-xs uppercase tracking-wider text-slate-400 mt-3 mb-1">Balance field watched</label>
+          <select id="s_balfield" class="w-full px-3 py-2 rounded-lg border border-slate-700 bg-slate-950 text-slate-200 text-sm font-mono focus:outline-none focus:border-sky-400">
+            <option value="availableBalance">availableBalance</option>
+            <option value="workingBalance">workingBalance</option>
+            <option value="ledgerBalance">ledgerBalance</option>
+            <option value="clearedBalance">clearedBalance</option>
+          </select>
+        </div>
+        <div class="flex-1 min-w-[200px]"><label class="block text-xs uppercase tracking-wider text-slate-400 mt-3 mb-1">Auto-renew token when ≤ (days) left</label><input id="s_renew" type="number" min="1" class="w-full px-3 py-2 rounded-lg border border-slate-700 bg-slate-950 text-slate-200 text-sm font-mono focus:outline-none focus:border-sky-400"></div>
+      </div>
+
+      <p class="text-slate-400 text-sm mt-4">Transaction-history callbacks — each enabled one is fired on a balance change. Up to two destinations.</p>
+      <div class="border border-slate-700 rounded-lg p-3 mt-2">
+        <label class="flex items-center gap-2 text-sm text-slate-300"><input type="checkbox" id="s_h0_en" class="accent-sky-500 w-4 h-4"> Enable callback #1</label>
+        <div class="flex flex-wrap gap-3">
+          <div class="flex-1 min-w-[200px]"><label class="block text-xs uppercase tracking-wider text-slate-400 mt-3 mb-1">Format</label><select id="s_h0_fmt" class="w-full px-3 py-2 rounded-lg border border-slate-700 bg-slate-950 text-slate-200 text-sm font-mono focus:outline-none focus:border-sky-400"><option value="json">A &middot; JSON {"history":[…]} → …/{account}</option><option value="form">B &middot; form account_code + account_data</option></select></div>
+          <div class="flex-1 min-w-[200px]"><label class="block text-xs uppercase tracking-wider text-slate-400 mt-3 mb-1">URL <span class="text-slate-500 normal-case tracking-normal">({account} = number)</span></label><textarea id="s_h0_url" rows="2" class="w-full px-3 py-2 rounded-lg border border-slate-700 bg-slate-950 text-slate-200 text-sm font-mono focus:outline-none focus:border-sky-400 resize-y break-all"></textarea></div>
+        </div>
+      </div>
+      <div class="border border-slate-700 rounded-lg p-3 mt-2">
+        <label class="flex items-center gap-2 text-sm text-slate-300"><input type="checkbox" id="s_h1_en" class="accent-sky-500 w-4 h-4"> Enable callback #2</label>
+        <div class="flex flex-wrap gap-3">
+          <div class="flex-1 min-w-[200px]"><label class="block text-xs uppercase tracking-wider text-slate-400 mt-3 mb-1">Format</label><select id="s_h1_fmt" class="w-full px-3 py-2 rounded-lg border border-slate-700 bg-slate-950 text-slate-200 text-sm font-mono focus:outline-none focus:border-sky-400"><option value="json">A &middot; JSON {"history":[…]} → …/{account}</option><option value="form">B &middot; form account_code + account_data</option></select></div>
+          <div class="flex-1 min-w-[200px]"><label class="block text-xs uppercase tracking-wider text-slate-400 mt-3 mb-1">URL <span class="text-slate-500 normal-case tracking-normal">({account} = number)</span></label><textarea id="s_h1_url" rows="2" class="w-full px-3 py-2 rounded-lg border border-slate-700 bg-slate-950 text-slate-200 text-sm font-mono focus:outline-none focus:border-sky-400 resize-y break-all"></textarea></div>
+        </div>
+      </div>
+
+      <label class="flex items-center gap-2 mt-4 text-sm text-slate-300"><input type="checkbox" id="s_dash_en" class="accent-sky-500 w-4 h-4"> Enable dashboard callback (on any dashboard change)</label>
+      <label class="block text-xs uppercase tracking-wider text-slate-400 mt-3 mb-1">Dashboard callback URL</label><textarea id="s_dash_url" rows="2" class="w-full px-3 py-2 rounded-lg border border-slate-700 bg-slate-950 text-slate-200 text-sm font-mono focus:outline-none focus:border-sky-400 resize-y break-all"></textarea>
+
+      <p class="text-slate-400 text-sm mt-4">Notifications (ALERTS) callbacks — each enabled one is POSTed the full response <strong>only when the alert set changes</strong>. Up to two destinations.</p>
+      <div><label class="block text-xs uppercase tracking-wider text-slate-400 mt-3 mb-1">Notifications query</label><input id="s_notif_q" placeholder="limit=20&group=ALERTS" class="w-full px-3 py-2 rounded-lg border border-slate-700 bg-slate-950 text-slate-200 text-sm font-mono focus:outline-none focus:border-sky-400"></div>
+      <div class="border border-slate-700 rounded-lg p-3 mt-2">
+        <label class="flex items-center gap-2 text-sm text-slate-300"><input type="checkbox" id="s_n0_en" class="accent-sky-500 w-4 h-4"> Enable notifications callback #1</label>
+        <label class="block text-xs uppercase tracking-wider text-slate-400 mt-3 mb-1">URL</label><textarea id="s_n0_url" rows="2" class="w-full px-3 py-2 rounded-lg border border-slate-700 bg-slate-950 text-slate-200 text-sm font-mono focus:outline-none focus:border-sky-400 resize-y break-all"></textarea>
+      </div>
+      <div class="border border-slate-700 rounded-lg p-3 mt-2">
+        <label class="flex items-center gap-2 text-sm text-slate-300"><input type="checkbox" id="s_n1_en" class="accent-sky-500 w-4 h-4"> Enable notifications callback #2</label>
+        <label class="block text-xs uppercase tracking-wider text-slate-400 mt-3 mb-1">URL</label><textarea id="s_n1_url" rows="2" class="w-full px-3 py-2 rounded-lg border border-slate-700 bg-slate-950 text-slate-200 text-sm font-mono focus:outline-none focus:border-sky-400 resize-y break-all"></textarea>
+      </div>
+
+      <label class="block text-xs uppercase tracking-wider text-slate-400 mt-4 mb-1">Callback Authorization header <span class="text-slate-500 normal-case tracking-normal">(optional, applied to all callbacks)</span></label><textarea id="s_auth" rows="2" placeholder="e.g. Bearer xxxxx — leave blank for none" class="w-full px-3 py-2 rounded-lg border border-slate-700 bg-slate-950 text-slate-200 text-sm font-mono focus:outline-none focus:border-sky-400 resize-y break-all"></textarea>
+
+      <button id="btnSaveSettings" type="button" class="bg-blue-600 hover:bg-blue-700 text-white font-semibold text-sm px-5 py-2 rounded-lg mt-4">Save settings</button>
+      <div id="settingsMsg" class="text-sm mt-2 min-h-[1.1rem]"></div>
+    </div>
+
+    <!-- Firewall -->
+    <div class="bg-slate-800 border border-slate-700 rounded-xl p-6 mb-5">
+      <h2 class="text-base font-semibold mb-1">Firewall — allowed IPs</h2>
+      <p class="text-slate-400 text-xs"><span id="fwRule" class="font-mono"></span> &middot; only these IPs can reach the proxy on port 8000. Be careful not to remove your own.</p>
+      <div id="fwList" class="flex flex-wrap gap-2 mt-3"><span class="text-slate-400 text-sm">loading…</span></div>
+      <div class="flex gap-2 mt-3 flex-wrap">
+        <input id="fwIp" placeholder="e.g. 1.2.3.4  ·  1.2.3.0/24  ·  1.2.3.4-1.2.3.9" class="flex-1 min-w-[220px] px-3 py-2 rounded-lg border border-slate-700 bg-slate-950 text-slate-200 text-sm font-mono focus:outline-none focus:border-sky-400">
+        <button id="fwAdd" type="button" class="bg-blue-600 hover:bg-blue-700 text-white font-semibold text-sm px-5 py-2 rounded-lg disabled:opacity-60 disabled:cursor-wait">Add IP</button>
+      </div>
+      <div id="fwMsg" class="text-sm mt-2 min-h-[1.1rem]"></div>
+    </div>
+  </div>
+</div>
+
+<script>
+const $ = id => document.getElementById(id);
+const api = (path, opts) => fetch('/faseyha/api/' + path, opts);
+function show(el, on) { $(el).classList.toggle('hidden', !on); }
+function msg(el, text, isErr) { const e = $(el); e.textContent = text || ''; e.className = 'text-sm mt-2 min-h-[1.1rem] ' + (isErr ? 'text-rose-400' : 'text-emerald-400'); }
+async function jpost(path, body, json) {
+  const init = { method: 'POST' };
+  if (json) { init.headers = { 'Content-Type': 'application/json' }; init.body = JSON.stringify(body); }
+  else { init.headers = { 'Content-Type': 'application/x-www-form-urlencoded' }; init.body = new URLSearchParams(body); }
+  const r = await api(path, init);
+  let data = {}; try { data = await r.json(); } catch (e) {}
+  return { ok: r.ok, status: r.status, data };
+}
+
+/* ---------------- gate ---------------- */
+async function boot() {
+  const r = await api('app-status'); const st = await r.json();
+  if (!st.has_password) { show('setupCard', true); show('loginCard', false); show('appView', false); show('topActions', false); }
+  else if (!st.authed)  { show('setupCard', false); show('loginCard', true); show('appView', false); show('topActions', false); }
+  else { show('setupCard', false); show('loginCard', false); show('appView', true); show('topActions', true); loadState(); }
+}
+
+$('btnSetup').onclick = async () => {
+  const pw = $('setupPw').value;
+  const { ok, data } = await jpost('app-setup', { password: pw });
+  if (ok) boot(); else msg('setupMsg', data.error || 'Failed', true);
+};
+$('btnLogin').onclick = async () => {
+  const pw = $('loginPw').value;
+  const { ok, data } = await jpost('app-login', { password: pw });
+  if (ok) boot(); else msg('loginMsg', data.error || 'Failed', true);
+};
+$('btnAppLogout').onclick = async () => { await api('app-logout', { method: 'POST' }); boot(); };
+$('btnChangePw').onclick = async () => {
+  const oldp = prompt('Current password:'); if (oldp === null) return;
+  const newp = prompt('New password (min 4 chars):'); if (newp === null) return;
+  const { ok, data } = await jpost('change-password', { old_password: oldp, new_password: newp });
+  alert(ok ? 'Password changed.' : (data.error || 'Failed'));
+};
+
+/* ---------------- app state ---------------- */
+function fmtAge(sec) {
+  if (sec == null) return '';
+  if (sec <= 0) return 'expired';
+  if (sec < 3600) return '~' + Math.round(sec / 60) + 'm';
+  if (sec < 86400) return '~' + Math.round(sec / 3600) + 'h';
+  return '~' + Math.round(sec / 86400) + 'd';
+}
+function fmtTime(ts) { return ts ? new Date(ts * 1000).toLocaleString() : '—'; }
+
+async function loadState() {
+  const r = await api('state');
+  if (r.status === 401) return boot();
+  const s = await r.json();
+
+  // BML session
+  const bml = s.bml || {};
+  $('bmlPill').textContent = bml.logged_in ? 'connected' : 'not connected';
+  $('bmlPill').className = 'inline-block px-2.5 py-0.5 rounded-full text-xs font-bold ' +
+    (bml.logged_in ? 'bg-emerald-900 text-emerald-300' : 'bg-rose-900 text-rose-300');
+  show('bmlConnected', bml.logged_in);
+  show('bmlDisconnected', !bml.logged_in);
+  if (bml.logged_in) {
+    const renewDays = Math.round(((s.settings || {}).renew_before_sec ?? 432000) / 86400);
+    $('bmlExpiry').textContent = 'Token expires ' + fmtTime(bml.expires_at) +
+      ' (' + fmtAge(bml.expires_in_sec) + ')' +
+      (bml.has_refresh ? ' · auto-renews when ≤ ' + renewDays + 'd left' : ' · no refresh token');
+  }
+
+  // settings
+  const cfg = s.settings || {};
+  $('s_poll').value = cfg.poll_interval ?? 10;
+  $('s_notif_int').value = cfg.notifications_interval ?? 10;
+  $('s_prefix').value = cfg.account_prefix ?? '7';
+  $('s_balfield').value = cfg.balance_field ?? 'availableBalance';
+  $('s_renew').value = Math.round((cfg.renew_before_sec ?? 432000) / 86400);
+  const hcbs = cfg.history_callbacks || [];
+  for (let i = 0; i < 2; i++) {
+    const c = hcbs[i] || {};
+    $('s_h' + i + '_en').checked = !!c.enabled;
+    $('s_h' + i + '_fmt').value = c.format || 'json';
+    $('s_h' + i + '_url').value = c.url || '';
+  }
+  $('s_dash_en').checked = !!cfg.dashboard_cb_enabled;
+  $('s_dash_url').value = cfg.dashboard_cb_url ?? '';
+  $('s_notif_q').value = cfg.notifications_query ?? 'limit=20&group=ALERTS';
+  const ncbs = cfg.notification_callbacks || [];
+  for (let i = 0; i < 2; i++) {
+    const c = ncbs[i] || {};
+    $('s_n' + i + '_en').checked = !!c.enabled;
+    $('s_n' + i + '_url').value = c.url || '';
+  }
+  $('s_auth').value = cfg.callback_auth ?? '';
+
+  // accounts
+  $('s_trackall').checked = (cfg.track_all !== false);
+  const accts = s.accounts || [];
+  if (!accts.length) {
+    $('acctWrap').innerHTML = '<p class="text-slate-400 text-sm">No accounts yet (no successful poll, or none match the prefix).</p>';
+  } else {
+    let h = '<table class="w-full text-sm border-collapse"><thead><tr class="text-sky-300">' +
+            '<th class="border-b border-slate-700 px-2 py-1 text-center w-14">Watch</th>' +
+            '<th class="border-b border-slate-700 px-2 py-1 text-left">Account</th>' +
+            '<th class="border-b border-slate-700 px-2 py-1 text-left">Alias</th>' +
+            '<th class="border-b border-slate-700 px-2 py-1 text-left">Currency</th>' +
+            '<th class="border-b border-slate-700 px-2 py-1 text-right">Balance</th>' +
+            '<th class="border-b border-slate-700 px-2 py-1 text-center">Force</th></tr></thead><tbody>';
+    accts.forEach(a => {
+      h += '<tr>' +
+           '<td class="border-b border-slate-800 px-2 py-1 text-center"><input type="checkbox" class="acctChk accent-sky-500 w-4 h-4" data-acc="' + esc(a.account) + '"' + (a.tracked ? ' checked' : '') + '></td>' +
+           '<td class="border-b border-slate-800 px-2 py-1 font-mono">' + esc(a.account) + '</td>' +
+           '<td class="border-b border-slate-800 px-2 py-1">' + esc(a.alias || '') + '</td>' +
+           '<td class="border-b border-slate-800 px-2 py-1">' + esc(a.currency || '') + '</td>' +
+           '<td class="border-b border-slate-800 px-2 py-1 text-right font-mono text-amber-400">' + esc(String(a.balance ?? '')) + '</td>' +
+           '<td class="border-b border-slate-800 px-2 py-1 text-center"><button class="forceBtn bg-slate-600 hover:bg-slate-500 text-white text-xs font-semibold px-2.5 py-1 rounded" data-acc="' + esc(a.account) + '">Force</button></td></tr>';
+    });
+    $('acctWrap').innerHTML = h + '</tbody></table>';
+  }
+  wireAcctChecks();
+  document.querySelectorAll('.forceBtn').forEach(b => b.onclick = () => forceUpdate(b.dataset.acc, b));
+
+  // last poll
+  const lp = s.last_poll || {};
+  $('lastPoll').textContent = lp.at ? ('· last poll ' + fmtTime(lp.at) +
+    (lp.ok ? ' ✓ ' : ' ✗ ') + (lp.message || '')) : '';
+
+  loadFirewall();
+}
+
+/* ---------------- firewall allowed IPs ---------------- */
+async function loadFirewall() {
+  try {
+    const r = await api('firewall');
+    if (!r.ok) { $('fwList').innerHTML = '<span class="text-rose-400 text-sm">could not read firewall rule</span>'; return; }
+    const d = await r.json();
+    $('fwRule').textContent = d.rule || '';
+    renderFw(d.addresses || []);
+  } catch (e) { $('fwList').innerHTML = '<span class="text-rose-400 text-sm">error reading firewall</span>'; }
+}
+function renderFw(ips) {
+  $('fwList').innerHTML = ips.length
+    ? ips.map(ip => '<span class="inline-flex items-center gap-1.5 bg-slate-700 rounded-full pl-3 pr-2 py-1 text-sm font-mono">' +
+        esc(ip) + '<button data-rm="' + esc(ip) + '" title="remove" class="text-rose-300 hover:text-rose-200 font-bold leading-none">&times;</button></span>').join('')
+    : '<span class="text-slate-400 text-sm">none</span>';
+  $('fwList').querySelectorAll('button[data-rm]').forEach(b => b.onclick = () => {
+    if (confirm('Remove ' + b.dataset.rm + ' from the firewall allow-list?')) fwAction('remove', [b.dataset.rm]);
+  });
+}
+async function fwAction(action, ips) {
+  const { ok, data } = await jpost('firewall', { action, ips }, true);
+  if (ok) { renderFw(data.addresses || []); msg('fwMsg', action === 'add' ? 'IP added.' : 'IP removed.'); }
+  else msg('fwMsg', data.error || 'Failed', true);
+}
+$('fwAdd').onclick = async () => {
+  const btn = $('fwAdd');
+  if (btn.disabled) return;                       // ignore double-clicks while in flight
+  const ip = $('fwIp').value.trim();
+  if (!ip) return msg('fwMsg', 'Enter an IP, CIDR or range first.', true);
+  const old = btn.textContent;
+  btn.disabled = true; btn.textContent = 'Adding…';
+  try {
+    await fwAction('add', [ip]);
+    $('fwIp').value = '';
+  } finally {
+    btn.disabled = false; btn.textContent = old;
+  }
+};
+function esc(s) { return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }
+
+/* Track-all and per-account checkboxes stay in sync, no disabling:
+   - ticking "Track all" selects every account
+   - unticking any account leaves track-all mode; "Track all" reflects "all ticked" */
+function allAcctChecks() { return Array.from(document.querySelectorAll('.acctChk')); }
+$('s_trackall').onchange = () => {
+  if ($('s_trackall').checked) allAcctChecks().forEach(cb => cb.checked = true);
+};
+function wireAcctChecks() {
+  allAcctChecks().forEach(cb => cb.addEventListener('change', () => {
+    $('s_trackall').checked = allAcctChecks().every(x => x.checked);
+  }));
+}
+
+/* force-fetch one account's history -> push to callbacks now (no balance change needed) */
+async function forceUpdate(acc, btn) {
+  const old = btn.textContent; btn.disabled = true; btn.textContent = '…';
+  try {
+    const r = await fetch('/api/forceupdate/' + encodeURIComponent(acc), { method: 'POST' });
+    const d = await r.json();
+    if (r.ok) msg('trackedMsg', 'Force ' + acc + ': ' + d.transactions + ' tx · ' +
+      d.callbacks_enabled + ' callback(s) ' + (d.posted_ok ? '✓' : '✗ (none enabled or failed)'), !d.posted_ok && d.callbacks_enabled > 0);
+    else msg('trackedMsg', 'Force ' + acc + ': ' + (d.error || 'failed'), true);
+  } catch (e) { msg('trackedMsg', 'error: ' + e.message, true); }
+  finally { btn.disabled = false; btn.textContent = old; }
+}
+
+$('btnSaveTracked').onclick = async (e) => {
+  const track_all = $('s_trackall').checked;
+  const tracked_accounts = allAcctChecks().filter(cb => cb.checked).map(cb => cb.dataset.acc);
+  e.target.disabled = true;
+  const { ok, data } = await jpost('settings', { track_all, tracked_accounts }, true);
+  e.target.disabled = false;
+  msg('trackedMsg', ok ? 'Saved.' : (data.error || 'Failed'), !ok);
+  loadState();
+};
+
+/* ---------------- actions ---------------- */
+$('btnPollNow').onclick = async (e) => {
+  e.target.disabled = true; msg('bmlMsg', 'polling…');
+  const { ok, data } = await jpost('poll-now', {}, true);
+  e.target.disabled = false;
+  msg('bmlMsg', ok ? ('Polled: ' + ((data.last_poll || {}).message || '')) : (data.error || 'Failed'), !ok);
+  loadState();
+};
+$('btnBmlLogout').onclick = async () => {
+  if (!confirm('Disconnect the saved BML session? The poller will stop until you log in again.')) return;
+  await jpost('bml-logout', {}, true); loadState();
+};
+$('btnBmlLogin').onclick = async (e) => {
+  const url = $('cbUrl').value.trim();
+  if (!url) return msg('bmlMsg', 'Paste the callback URL or code first.', true);
+  e.target.disabled = true; msg('bmlMsg', 'exchanging… (Cloudflare handshake can take a few seconds)');
+  const { ok, data } = await jpost('bml-login', { url });
+  e.target.disabled = false;
+  if (ok) { msg('bmlMsg', 'BML session saved.'); loadState(); }
+  else msg('bmlMsg', data.error || ('Failed (HTTP ' + (data.status || '?') + ')'), true);
+};
+$('btnSaveSettings').onclick = async (e) => {
+  const patch = {
+    poll_interval: Number($('s_poll').value) || 10,
+    notifications_interval: Number($('s_notif_int').value) || 10,
+    account_prefix: $('s_prefix').value.trim(),
+    balance_field: $('s_balfield').value,
+    renew_before_sec: (Number($('s_renew').value) || 5) * 86400,
+    history_callbacks: [0, 1].map(i => ({
+      enabled: $('s_h' + i + '_en').checked,
+      format: $('s_h' + i + '_fmt').value,
+      url: $('s_h' + i + '_url').value.trim(),
+    })),
+    dashboard_cb_enabled: $('s_dash_en').checked,
+    dashboard_cb_url: $('s_dash_url').value.trim(),
+    notifications_query: $('s_notif_q').value.trim(),
+    notification_callbacks: [0, 1].map(i => ({
+      enabled: $('s_n' + i + '_en').checked,
+      url: $('s_n' + i + '_url').value.trim(),
+    })),
+    callback_auth: $('s_auth').value.trim(),
+  };
+  e.target.disabled = true;
+  const { ok, data } = await jpost('settings', patch, true);
+  e.target.disabled = false;
+  msg('settingsMsg', ok ? 'Saved.' : (data.error || 'Failed'), !ok);
+};
+
+/* ---------------- BML login link (PKCE, same constants as /docs) ---------------- */
+const AUTHORIZE_URL = 'https://www.bankofmaldives.com.mv/internetbanking/oauth/authorize';
+const CLIENT_ID = '98C83590-513F-4716-B02B-EC68B7D9E7E7';
+const REDIRECT_URI = 'https://app.bankofmaldives.com.mv/oauth/mobile-callback';
+const CODE_CHALLENGE = 'ZSO2idV38X6FR3GHWZu0W6RPsOurEIGOQOrj_8XzfnA';
+function randHex(n) { const a = new Uint8Array(n); crypto.getRandomValues(a); return Array.from(a).map(x => x.toString(16).padStart(2, '0')).join(''); }
+function buildLogin() {
+  const p = new URLSearchParams({ nonce: randHex(16), response_type: 'code', code_challenge_method: 'S256',
+    scope: '', code_challenge: CODE_CHALLENGE, redirect_uri: REDIRECT_URI, client_id: CLIENT_ID, state: randHex(8) });
+  return AUTHORIZE_URL + '?' + p.toString();
+}
+const ll = $('loginLink');
+ll.href = buildLogin();
+ll.addEventListener('click', () => { ll.href = buildLogin(); });
+
+/* fill the force-update API examples with this server's base URL */
+document.querySelectorAll('.apiBase').forEach(e => e.textContent = location.origin);
+
+/* live status refresh (lightweight: connection pill + last-poll only, so the
+   background polling is visible without clobbering settings / account selection) */
+async function refreshStatus() {
+  if ($('appView').classList.contains('hidden')) return;
+  let s;
+  try { const r = await api('state'); if (r.status === 401) return; s = await r.json(); } catch (e) { return; }
+  const bml = s.bml || {};
+  $('bmlPill').textContent = bml.logged_in ? 'connected' : 'not connected';
+  $('bmlPill').className = 'inline-block px-2.5 py-0.5 rounded-full text-xs font-bold ' +
+    (bml.logged_in ? 'bg-emerald-900 text-emerald-300' : 'bg-rose-900 text-rose-300');
+  show('bmlConnected', bml.logged_in);
+  show('bmlDisconnected', !bml.logged_in);
+  const lp = s.last_poll || {};
+  $('lastPoll').textContent = lp.at ? ('· last poll ' + fmtTime(lp.at) +
+    (lp.ok ? ' ✓ ' : ' ✗ ') + (lp.message || '')) : '';
+}
+setInterval(refreshStatus, 20000);
+
+boot();
+</script>
+</body>
+</html>

@@ -1,0 +1,98 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Faseyha — Logs</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<script>
+  tailwind.config = { darkMode: 'class', theme: { extend: { fontFamily: {
+    mono: ['ui-monospace', 'Cascadia Code', 'Consolas', 'monospace'] } } } };
+</script>
+<style type="text/tailwindcss">
+  table { @apply w-full text-sm border-collapse; }
+  thead th { @apply text-sky-300 sticky top-0 bg-slate-900 z-10; }
+  th, td { @apply border-b border-slate-800 px-2 py-1.5 align-top text-left; }
+  .k { @apply inline-block px-1.5 py-0.5 rounded-full text-[0.68rem] font-bold tracking-wide; }
+  .k.bml { @apply bg-sky-900 text-sky-300; }
+  .k.callback { @apply bg-violet-900 text-violet-200; }
+  .k.http { @apply bg-blue-900 text-blue-300; }
+  .ok { @apply text-emerald-300; } .bad { @apply text-rose-300; } .warn { @apply text-amber-300; }
+  tr.row { @apply cursor-pointer; } tr.row:hover { @apply bg-slate-800/60; }
+  td.ms { @apply text-right text-amber-400 font-mono whitespace-nowrap; }
+  td.code { @apply font-mono font-bold; }
+  td.lbl { @apply font-mono break-all; }
+  .body { display: none; } .body.show { display: table-row; }
+  .body pre { @apply bg-slate-950 border border-slate-800 rounded-lg p-3 overflow-x-auto whitespace-pre-wrap break-words max-h-[24rem] overflow-y-auto font-mono text-xs text-slate-300; }
+</style>
+</head>
+<body class="bg-slate-900 text-slate-200 leading-normal min-h-screen antialiased">
+<div class="max-w-6xl mx-auto px-4 pt-6 pb-20">
+  <div class="flex items-baseline">
+    <h1 class="text-sky-400 text-2xl font-bold">Realtime logs</h1>
+    <a href="/faseyha" class="text-slate-400 hover:text-slate-200 text-sm ml-3">&larr; back to dashboard</a>
+  </div>
+
+  <div class="flex gap-3 items-center flex-wrap my-4 text-sm text-slate-400">
+    <label class="flex items-center gap-1.5"><input type="checkbox" id="auto" class="accent-sky-500 w-4 h-4" checked> Auto-refresh</label>
+    <label>every <select id="every" class="bg-slate-950 border border-slate-700 rounded-md px-2 py-1 text-slate-200"><option value="2000">2s</option><option value="3000" selected>3s</option><option value="5000">5s</option><option value="10000">10s</option></select></label>
+    <label>kind <select id="kind" class="bg-slate-950 border border-slate-700 rounded-md px-2 py-1 text-slate-200"><option value="">all</option><option value="bml">bml</option><option value="callback">callback</option><option value="http">http</option></select></label>
+    <label>limit <select id="limit" class="bg-slate-950 border border-slate-700 rounded-md px-2 py-1 text-slate-200"><option>100</option><option selected>200</option><option>500</option><option>1000</option></select></label>
+    <button id="refresh" class="bg-blue-600 hover:bg-blue-700 text-white rounded-md px-3 py-1 font-semibold">Refresh now</button>
+    <span id="status" class="text-slate-400"></span>
+  </div>
+
+  <div class="overflow-x-auto rounded-lg border border-slate-800">
+    <table>
+      <thead><tr><th class="w-40">Time</th><th class="w-20">Kind</th><th>Label</th><th class="w-20">Status</th><th class="w-20">ms</th></tr></thead>
+      <tbody id="rows"><tr><td colspan="5" class="text-slate-400">loading…</td></tr></tbody>
+    </table>
+  </div>
+</div>
+<script>
+const $ = id => document.getElementById(id);
+function esc(s){ return String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+function fmtTime(ts){ if(!ts) return ''; const d=new Date(ts*1000); return d.toLocaleTimeString()+'.'+String(d.getMilliseconds()).padStart(3,'0'); }
+function codeClass(s){ if(s==null) return 'bad'; if(s>=200&&s<300) return 'ok'; if(s>=300&&s<400) return 'warn'; return 'bad'; }
+
+let timer=null;
+async function load(){
+  const kind=$('kind').value, limit=$('limit').value;
+  let data;
+  try{
+    const r=await fetch('/faseyha/api/logs?limit='+limit, {cache:'no-store'});
+    if(r.status===401){ location.href='/faseyha'; return; }
+    data=await r.json();
+  }catch(e){ $('status').textContent='offline'; return; }
+  let evs=(data.events||[]);
+  if(kind) evs=evs.filter(e=>e.kind===kind);
+  const tb=$('rows');
+  if(!evs.length){ tb.innerHTML='<tr><td colspan="5" class="text-slate-400">no events yet</td></tr>'; $('status').textContent='0 shown · '+fmtTime(Date.now()/1000); return; }
+  let h='';
+  evs.forEach((e,i)=>{
+    const code = e.status==null ? 'ERR' : e.status;
+    h+='<tr class="row" data-i="'+i+'">'+
+       '<td>'+fmtTime(e.at)+'</td>'+
+       '<td><span class="k '+esc(e.kind)+'">'+esc(e.kind)+'</span></td>'+
+       '<td class="lbl">'+esc(e.label)+'</td>'+
+       '<td class="code '+codeClass(e.status)+'">'+esc(code)+'</td>'+
+       '<td class="ms">'+(e.ms==null?'':esc(e.ms))+'</td></tr>'+
+       '<tr class="body" data-b="'+i+'"><td colspan="5">'+
+       (e.body?('<pre>'+esc(e.body)+'</pre>'):'<span class="text-slate-400">no body captured</span>')+'</td></tr>';
+  });
+  tb.innerHTML=h;
+  tb.querySelectorAll('tr.row').forEach(r=>r.addEventListener('click',()=>{
+    const b=tb.querySelector('tr.body[data-b="'+r.dataset.i+'"]'); if(b) b.classList.toggle('show');
+  }));
+  $('status').textContent=evs.length+' shown · updated '+fmtTime(Date.now()/1000);
+}
+function schedule(){ if(timer) clearInterval(timer); if($('auto').checked) timer=setInterval(load, Number($('every').value)); }
+$('refresh').onclick=load;
+$('auto').onchange=schedule;
+$('every').onchange=schedule;
+$('kind').onchange=load;
+$('limit').onchange=load;
+load(); schedule();
+</script>
+</body>
+</html>

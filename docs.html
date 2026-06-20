@@ -1,0 +1,349 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>BML API — Tester</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<script>
+  tailwind.config = { darkMode: 'class', theme: { extend: { fontFamily: {
+    mono: ['ui-monospace', 'Cascadia Code', 'Consolas', 'monospace'] } } } };
+</script>
+<style type="text/tailwindcss">
+  /* dynamic classes used by the tester JS (kept stable, composed from Tailwind) */
+  .out { @apply hidden mt-3 bg-slate-950 border border-slate-800 rounded-lg px-4 py-3 overflow-x-auto text-xs whitespace-pre max-h-[360px] overflow-y-auto; }
+  .out.show { @apply block; }
+  .st { @apply font-bold; }
+  .ok { @apply text-emerald-300; } .err { @apply text-rose-300; } .muted { @apply text-slate-400; }
+  .saved { @apply text-emerald-300; }
+  .j-key { @apply text-sky-300; } .j-str { @apply text-emerald-300; } .j-num { @apply text-amber-400; }
+  .j-bool { @apply text-pink-400; } .j-null { @apply text-slate-400; }
+  table.csv { @apply border-collapse text-xs mt-1; white-space: normal; }
+  table.csv th, table.csv td { @apply border border-slate-800 px-2 py-1 text-left align-top; }
+  table.csv th { @apply text-sky-300 sticky top-0 bg-slate-950; }
+  table.csv td:nth-child(9)  { @apply text-rose-300 text-right; }
+  table.csv td:nth-child(10) { @apply text-emerald-300 text-right; }
+  table.csv td:nth-child(11) { @apply text-amber-400 text-right; }
+</style>
+</head>
+<body class="bg-slate-900 text-slate-200 leading-relaxed min-h-screen antialiased">
+<div class="max-w-3xl mx-auto px-4 pt-8 pb-20">
+  <h1 class="text-sky-400 text-[1.7rem] font-bold">BML API</h1>
+  <div class="text-slate-400 text-sm mt-1 mb-6">Base URL: <code id="base" class="text-amber-400 font-mono"></code> &middot; interactive tester</div>
+
+  <div class="sticky top-0 z-10 bg-slate-900 pt-3 pb-4 border-b border-slate-800 mb-6">
+    <label class="block text-slate-400 text-xs uppercase tracking-wider mb-1">Access Token &mdash; used by all authed (GET) requests &middot; saved in this browser</label>
+    <input id="token" placeholder="paste an access_token, or run Create Session / Refresh to auto-fill" class="w-full px-3 py-2 rounded-lg border border-slate-700 bg-slate-950 text-slate-200 text-sm font-mono focus:outline-none focus:border-sky-400">
+    <div id="tokenMeta" class="text-slate-400 text-xs mt-1"></div>
+    <button class="bg-slate-600 hover:bg-slate-500 text-white px-3 py-1.5 rounded-lg text-xs font-semibold mt-2" type="button" data-clear="1">Clear saved tokens</button>
+  </div>
+
+  <!-- create_session -->
+  <div class="bg-slate-800 border border-slate-700 rounded-xl p-6 mb-5">
+    <h2 class="text-base font-semibold mb-2 flex items-center gap-2"><span class="text-[0.72rem] font-bold px-2 py-0.5 rounded tracking-wide bg-blue-900 text-blue-300">POST</span> <span class="text-amber-400 font-mono">/api/create_session</span></h2>
+    <p class="text-slate-300 text-sm my-1">Exchange a BML OAuth callback URL (containing <code class="text-amber-400 font-mono">?code=...</code>) for tokens. On success the access &amp; refresh tokens auto-fill above and are saved in your browser.</p>
+    <p class="my-2"><a id="loginLink" class="inline-block bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2 rounded-lg font-semibold text-sm" href="#" target="_blank" rel="noopener">Step 1 &middot; Open BML Login &#8599;</a> <span class="text-slate-400 text-sm">&mdash; log in, then paste the redirected callback URL below.</span></p>
+    <label class="block text-slate-400 text-xs uppercase tracking-wider mt-3 mb-1">Step 2 &middot; Callback URL or raw code</label>
+    <input id="cs_url" placeholder="https://app.bankofmaldives.com.mv/oauth/mobile-callback?code=..." class="w-full px-3 py-2 rounded-lg border border-slate-700 bg-slate-950 text-slate-200 text-sm font-mono focus:outline-none focus:border-sky-400">
+    <button data-go="createSession" class="bg-blue-600 hover:bg-blue-700 text-white px-5 py-2 rounded-lg text-sm font-semibold mt-3">Send</button>
+    <pre class="out" id="cs_out"></pre>
+  </div>
+
+  <!-- refresh -->
+  <div class="bg-slate-800 border border-slate-700 rounded-xl p-6 mb-5">
+    <h2 class="text-base font-semibold mb-2 flex items-center gap-2"><span class="text-[0.72rem] font-bold px-2 py-0.5 rounded tracking-wide bg-blue-900 text-blue-300">POST</span> <span class="text-amber-400 font-mono">/api/refresh</span></h2>
+    <p class="text-slate-300 text-sm my-1">Get a fresh access token from a refresh token. Auto-fills the access token above on success.</p>
+    <label class="block text-slate-400 text-xs uppercase tracking-wider mt-3 mb-1">Refresh token</label>
+    <input id="rf_token" placeholder="refresh_token" class="w-full px-3 py-2 rounded-lg border border-slate-700 bg-slate-950 text-slate-200 text-sm font-mono focus:outline-none focus:border-sky-400">
+    <button data-go="refresh" class="bg-blue-600 hover:bg-blue-700 text-white px-5 py-2 rounded-lg text-sm font-semibold mt-3">Send</button>
+    <pre class="out" id="rf_out"></pre>
+  </div>
+
+  <!-- dashboard -->
+  <div class="bg-slate-800 border border-slate-700 rounded-xl p-6 mb-5">
+    <h2 class="text-base font-semibold mb-2 flex items-center gap-2"><span class="text-[0.72rem] font-bold px-2 py-0.5 rounded tracking-wide bg-emerald-950 text-emerald-300">GET</span> <span class="text-amber-400 font-mono">/api/dashboard</span></h2>
+    <p class="text-slate-300 text-sm my-1">Mobile dashboard for the authenticated user. Uses the access token above.</p>
+    <button data-go="dashboard" class="bg-blue-600 hover:bg-blue-700 text-white px-5 py-2 rounded-lg text-sm font-semibold mt-3">Send</button>
+    <pre class="out" id="db_out"></pre>
+  </div>
+
+  <!-- history -->
+  <div class="bg-slate-800 border border-slate-700 rounded-xl p-6 mb-5">
+    <h2 class="text-base font-semibold mb-2 flex items-center gap-2"><span class="text-[0.72rem] font-bold px-2 py-0.5 rounded tracking-wide bg-emerald-950 text-emerald-300">GET</span> <span class="text-amber-400 font-mono">/api/history/<span class="text-pink-400">{id}</span></span></h2>
+    <p class="text-slate-300 text-sm my-1">Today's transaction history for an account id.</p>
+    <label class="block text-slate-400 text-xs uppercase tracking-wider mt-3 mb-1">Account id</label>
+    <input id="hi_id" placeholder="AA56AB56-2BDB-E611-80E5-00155D020F0A" class="w-full px-3 py-2 rounded-lg border border-slate-700 bg-slate-950 text-slate-200 text-sm font-mono focus:outline-none focus:border-sky-400">
+    <button data-go="history" class="bg-blue-600 hover:bg-blue-700 text-white px-5 py-2 rounded-lg text-sm font-semibold mt-3">Send</button>
+    <pre class="out" id="hi_out"></pre>
+  </div>
+
+  <!-- statement -->
+  <div class="bg-slate-800 border border-slate-700 rounded-xl p-6 mb-5">
+    <h2 class="text-base font-semibold mb-2 flex items-center gap-2"><span class="text-[0.72rem] font-bold px-2 py-0.5 rounded tracking-wide bg-emerald-950 text-emerald-300">GET</span> <span class="text-amber-400 font-mono">/api/statement/<span class="text-pink-400">{id}</span>/<span class="text-pink-400">{from}</span>/<span class="text-pink-400">{to}</span></span></h2>
+    <p class="text-slate-300 text-sm my-1">Account statement between two dates. The bank returns <strong>CSV text</strong> (not JSON) &mdash; rendered as a table here; the raw API response is the CSV itself.</p>
+    <label class="block text-slate-400 text-xs uppercase tracking-wider mt-3 mb-1">Account id</label>
+    <input id="st_id" placeholder="50597EE3-010E-F111-B823-00155D0C4810" class="w-full px-3 py-2 rounded-lg border border-slate-700 bg-slate-950 text-slate-200 text-sm font-mono focus:outline-none focus:border-sky-400">
+    <div class="flex gap-3 flex-wrap">
+      <div class="flex-1 min-w-[220px]"><label class="block text-slate-400 text-xs uppercase tracking-wider mt-3 mb-1">From date</label><input id="st_from" type="date" class="w-full px-3 py-2 rounded-lg border border-slate-700 bg-slate-950 text-slate-200 text-sm font-mono focus:outline-none focus:border-sky-400"></div>
+      <div class="flex-1 min-w-[220px]"><label class="block text-slate-400 text-xs uppercase tracking-wider mt-3 mb-1">To date</label><input id="st_to" type="date" class="w-full px-3 py-2 rounded-lg border border-slate-700 bg-slate-950 text-slate-200 text-sm font-mono focus:outline-none focus:border-sky-400"></div>
+    </div>
+    <button data-go="statement" class="bg-blue-600 hover:bg-blue-700 text-white px-5 py-2 rounded-lg text-sm font-semibold mt-3">Send</button>
+    <pre class="out" id="st_out"></pre>
+  </div>
+
+  <!-- notifications -->
+  <div class="bg-slate-800 border border-slate-700 rounded-xl p-6 mb-5">
+    <h2 class="text-base font-semibold mb-2 flex items-center gap-2"><span class="text-[0.72rem] font-bold px-2 py-0.5 rounded tracking-wide bg-emerald-950 text-emerald-300">GET</span> <span class="text-amber-400 font-mono">/api/notifications</span></h2>
+    <p class="text-slate-300 text-sm my-1">Notifications list. Query params (if any) are forwarded upstream.</p>
+    <label class="block text-slate-400 text-xs uppercase tracking-wider mt-3 mb-1">Query string (optional)</label>
+    <input id="nt_q" placeholder="page=1&limit=20" class="w-full px-3 py-2 rounded-lg border border-slate-700 bg-slate-950 text-slate-200 text-sm font-mono focus:outline-none focus:border-sky-400">
+    <button data-go="notifications" class="bg-blue-600 hover:bg-blue-700 text-white px-5 py-2 rounded-lg text-sm font-semibold mt-3">Send</button>
+    <pre class="out" id="nt_out"></pre>
+  </div>
+</div>
+
+<script>
+const base = location.origin;
+document.getElementById('base').textContent = base;
+const $ = id => document.getElementById(id);
+
+/* ---- token persistence (saved in this browser via localStorage) ---------- */
+const LS = { at: 'bml_access_token', rt: 'bml_refresh_token', exp: 'bml_expires_at' };
+
+function persist(at, rt, expiresIn) {
+  if (at)  { localStorage.setItem(LS.at, at); $('token').value = at; }
+  if (rt)  { localStorage.setItem(LS.rt, rt); $('rf_token').value = rt; }
+  if (expiresIn) localStorage.setItem(LS.exp, String(Date.now() + Number(expiresIn) * 1000));
+  updateTokenMeta();
+}
+
+function clearTokens() {
+  Object.values(LS).forEach(k => localStorage.removeItem(k));
+  $('token').value = ''; $('rf_token').value = '';
+  updateTokenMeta();
+}
+
+function updateTokenMeta() {
+  const at = ($('token').value || '').trim();
+  const exp = Number(localStorage.getItem(LS.exp) || 0);
+  if (!at) { $('tokenMeta').textContent = 'No token saved.'; return; }
+  let msg = '<span class="saved">&#10003; token saved in browser</span>';
+  if (exp) {
+    const left = exp - Date.now();
+    msg += left > 0
+      ? ' &middot; expires in ~' + Math.round(left / 3600000) + 'h'
+      : ' &middot; <span class="err">expired &mdash; use Refresh</span>';
+  }
+  $('tokenMeta').innerHTML = msg;
+}
+
+function captureTokens(text) {
+  try {
+    const j = JSON.parse(text);
+    persist(j.access_token, j.refresh_token, j.expires_in);
+  } catch (e) {}
+}
+
+/* ---- nice JSON: pretty-print + syntax highlight --------------------------- */
+function esc(s) { return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }
+
+function highlight(text) {
+  let parsed;
+  try { parsed = JSON.parse(text); } catch (e) { return esc(text); }
+  const json = esc(JSON.stringify(parsed, null, 2));
+  return json.replace(
+    /("(\\u[a-zA-Z0-9]{4}|\\[^u]|[^\\"])*"(\s*:)?|\b(true|false|null)\b|-?\d+(?:\.\d+)?(?:[eE][+\-]?\d+)?)/g,
+    m => {
+      let c = 'j-num';
+      if (/^"/.test(m)) c = /:$/.test(m) ? 'j-key' : 'j-str';
+      else if (/true|false/.test(m)) c = 'j-bool';
+      else if (/null/.test(m)) c = 'j-null';
+      return '<span class="' + c + '">' + m + '</span>';
+    }
+  );
+}
+
+function render(outId, status, text, err) {
+  const el = $(outId);
+  const cls = err ? 'err' : (status >= 200 && status < 300 ? 'ok' : 'err');
+  const head = err ? 'ERROR' : ('HTTP ' + status);
+  el.innerHTML = '<span class="st ' + cls + '">' + head + '</span>\n\n' + highlight(text);
+  el.classList.add('show');
+}
+
+function loading(outId) {
+  const el = $(outId);
+  el.innerHTML = '<span class="muted">sending&hellip; (Cloudflare handshake can take a few seconds)</span>';
+  el.classList.add('show');
+}
+
+async function call(outId, btn, opts) {
+  loading(outId);
+  btn.disabled = true;
+  try {
+    const r = await fetch(opts.url, opts.init || {});
+    const t = await r.text();
+    render(outId, r.status, t);
+    if (opts.capture) captureTokens(t);
+  } catch (e) {
+    render(outId, 0, e.message, true);
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+function authHeader() {
+  const tok = $('token').value.trim();
+  return tok ? { 'Authorization': 'Bearer ' + tok } : {};
+}
+
+/* ---- statement: fetch CSV text, render as a table (errors stay JSON) ------ */
+const STMT_COLS = ['Date', 'Value Date', 'Description', 'Reference', 'Transaction ID',
+                   'Details', 'Counterparty', 'Channel', 'Debit', 'Credit', 'Balance'];
+
+function parseCSV(text) {
+  const rows = []; let row = [], field = '', q = false;
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i];
+    if (q) {
+      if (c === '"') { if (text[i + 1] === '"') { field += '"'; i++; } else q = false; }
+      else field += c;
+    } else if (c === '"') { q = true; }
+    else if (c === ',') { row.push(field); field = ''; }
+    else if (c === '\n' || c === '\r') {
+      if (c === '\r' && text[i + 1] === '\n') i++;
+      if (field !== '' || row.length) { row.push(field); rows.push(row); row = []; field = ''; }
+    } else field += c;
+  }
+  if (field !== '' || row.length) { row.push(field); rows.push(row); }
+  return rows;
+}
+
+function cleanCell(v) {
+  v = (v || '').trim();                         // BML wraps cells as ="value" for Excel
+  if (v.slice(0, 2) === '="' && v.slice(-1) === '"') v = v.slice(2, -1);
+  return v;
+}
+
+function renderStatement(outId, status, text) {
+  const el = $(outId);
+  const rows = parseCSV(text).filter(r => r.length > 1);
+  if (!rows.length) {
+    el.innerHTML = '<span class="st ok">HTTP ' + status + '</span>\n\n' +
+                   '<span class="muted">No transactions in this date range.</span>';
+    el.classList.add('show'); return;
+  }
+  let html = '<span class="st ok">HTTP ' + status + ' &middot; ' + rows.length +
+             ' rows</span>\n\n<table class="csv"><thead><tr>';
+  STMT_COLS.forEach(h => html += '<th>' + esc(h) + '</th>');
+  html += '</tr></thead><tbody>';
+  rows.forEach(r => {
+    html += '<tr>';
+    for (let i = 0; i < STMT_COLS.length; i++) html += '<td>' + esc(cleanCell(r[i])) + '</td>';
+    html += '</tr>';
+  });
+  el.innerHTML = html + '</tbody></table>';
+  el.classList.add('show');
+}
+
+async function callStatement(outId, btn, id, from, to) {
+  loading(outId);
+  btn.disabled = true;
+  try {
+    const url = base + '/api/statement/' + encodeURIComponent(id) +
+                '/' + encodeURIComponent(from) + '/' + encodeURIComponent(to);
+    const r = await fetch(url, { headers: authHeader() });
+    const t = await r.text();
+    if (r.ok && (r.headers.get('content-type') || '').indexOf('csv') !== -1) {
+      renderStatement(outId, r.status, t);   // success -> CSV table
+    } else {
+      render(outId, r.status, t);            // error -> JSON contract
+    }
+  } catch (e) {
+    render(outId, 0, e.message, true);
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+const actions = {
+  createSession(btn) {
+    const url = $('cs_url').value.trim();
+    if (!url) return render('cs_out', 0, 'Enter a callback URL or code first.', true);
+    call('cs_out', btn, {
+      url: base + '/api/create_session',
+      init: { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: new URLSearchParams({ url }) },
+      capture: true,
+    });
+  },
+  refresh(btn) {
+    const rt = $('rf_token').value.trim();
+    if (!rt) return render('rf_out', 0, 'Enter a refresh token first.', true);
+    call('rf_out', btn, {
+      url: base + '/api/refresh',
+      init: { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: new URLSearchParams({ refresh_token: rt }) },
+      capture: true,
+    });
+  },
+  dashboard(btn) {
+    call('db_out', btn, { url: base + '/api/dashboard', init: { headers: authHeader() } });
+  },
+  history(btn) {
+    const id = $('hi_id').value.trim();
+    if (!id) return render('hi_out', 0, 'Enter an account id first.', true);
+    call('hi_out', btn, { url: base + '/api/history/' + encodeURIComponent(id), init: { headers: authHeader() } });
+  },
+  statement(btn) {
+    const id = $('st_id').value.trim();
+    if (!id) return render('st_out', 0, 'Enter an account id first.', true);
+    const from = $('st_from').value.trim(), to = $('st_to').value.trim();
+    if (!from || !to) return render('st_out', 0, 'Pick both a from and to date.', true);
+    callStatement('st_out', btn, id, from, to);
+  },
+  notifications(btn) {
+    const q = $('nt_q').value.trim();
+    call('nt_out', btn, { url: base + '/api/notifications' + (q ? '?' + q : ''), init: { headers: authHeader() } });
+  },
+};
+
+document.querySelectorAll('button[data-go]').forEach(btn => {
+  btn.addEventListener('click', () => actions[btn.dataset.go](btn));
+});
+
+/* ---- BML login link (PKCE challenge is constant for the fixed verifier) --- */
+const AUTHORIZE_URL = 'https://www.bankofmaldives.com.mv/internetbanking/oauth/authorize';
+const CLIENT_ID     = '98C83590-513F-4716-B02B-EC68B7D9E7E7';
+const REDIRECT_URI  = 'https://app.bankofmaldives.com.mv/oauth/mobile-callback';
+const CODE_CHALLENGE = 'ZSO2idV38X6FR3GHWZu0W6RPsOurEIGOQOrj_8XzfnA';
+
+function randHex(n) {
+  const a = new Uint8Array(n);
+  crypto.getRandomValues(a); // available over http (only crypto.subtle needs HTTPS)
+  return Array.from(a).map(x => x.toString(16).padStart(2, '0')).join('');
+}
+function buildLogin() {
+  const p = new URLSearchParams({
+    nonce: randHex(16), response_type: 'code', code_challenge_method: 'S256',
+    scope: '', code_challenge: CODE_CHALLENGE, redirect_uri: REDIRECT_URI,
+    client_id: CLIENT_ID, state: randHex(8),
+  });
+  return AUTHORIZE_URL + '?' + p.toString();
+}
+const loginLink = $('loginLink');
+loginLink.href = buildLogin();
+loginLink.addEventListener('click', () => { loginLink.href = buildLogin(); }); // fresh nonce/state each click
+
+/* ---- clear + persist manual edits ---------------------------------------- */
+document.querySelector('button[data-clear]').addEventListener('click', clearTokens);
+$('token').addEventListener('input', () => { localStorage.setItem(LS.at, $('token').value.trim()); updateTokenMeta(); });
+$('rf_token').addEventListener('input', () => localStorage.setItem(LS.rt, $('rf_token').value.trim()));
+
+/* ---- restore saved tokens on load ---------------------------------------- */
+(function restore() {
+  const at = localStorage.getItem(LS.at); if (at) $('token').value = at;
+  const rt = localStorage.getItem(LS.rt); if (rt) $('rf_token').value = rt;
+  updateTokenMeta();
+})();
+</script>
+</body>
+</html>

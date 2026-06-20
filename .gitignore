@@ -1,0 +1,36 @@
+# Python virtual environment
+venv/
+.venv/
+
+# Byte-compiled / cache
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Logs (runtime, rotated)
+requests.log
+requests.log.*
+*.log
+
+# Secrets / runtime state — never commit live bank tokens
+tokens.json
+state.json
+state.json.tmp
+state.*.json
+*.env
+.env
+
+# Portable git used for pushing (not part of the project)
+.tools/
+
+# Throwaway helper scripts
+_*.py
+
+# Local Claude Code / editor config
+.claude/
+.vscode/
+.idea/
+
+# Windows cruft
+Thumbs.db
+desktop.ini
