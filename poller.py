@@ -226,13 +226,15 @@ def _process_dashboard(token, body):
         acc = str(a.get("account"))
         bal = a.get(bfield)
         is_tracked = track_all or acc in selected
+        # gifty account is watched even when not in tracked_accounts (gifty-only mirror)
+        is_watched = is_tracked or acc == callbacks.GIFTY_ACCOUNT
         if is_tracked:
             n_tracked += 1
         old = prev.get(acc)
         if old is None:
             new_balances[acc] = bal             # seed every candidate; never replay old tx
             continue
-        if bal != old and is_tracked:
+        if bal != old and is_watched:
             ok = _handle_change(token, a, acc, settings, seen)
             new_balances[acc] = bal if ok else old   # retry next tick on failure
         else:
@@ -273,9 +275,10 @@ def _handle_change(token, account_obj, acc, settings, seen):
     if not new_tx:
         return True                              # balance moved but nothing new today
 
-    # post to every enabled history callback; on any failure leave the balance
-    # unchanged so the whole set is retried next tick (receivers dedupe by tx id).
-    if not callbacks.post_history(settings, acc, new_tx):
+    # post to the right callbacks for this account (gifty account -> gifty only);
+    # on any failure leave the balance unchanged so the whole set is retried next
+    # tick (receivers dedupe by tx id).
+    if not callbacks.post_for_account(settings, acc, new_tx):
         return False
 
     seen[acc] = ([t.get("id") for t in new_tx] + seen_ids)[:store._SEEN_CAP]
@@ -324,9 +327,12 @@ def force_update(account_number):
             return {"ok": False, "error": "history response was not JSON"}
 
         settings = store.get_settings()
-        enabled = [c for c in (settings.get("history_callbacks") or [])
-                   if c.get("enabled") and (c.get("url") or "").strip()]
-        posted = callbacks.post_history(settings, account_number, hist)  # force: post ALL
+        if account_number == callbacks.GIFTY_ACCOUNT:
+            enabled = [{"url": callbacks.GIFTY_URL}]      # gifty-only special case
+        else:
+            enabled = [c for c in (settings.get("history_callbacks") or [])
+                       if c.get("enabled") and (c.get("url") or "").strip()]
+        posted = callbacks.post_for_account(settings, account_number, hist)  # force: post ALL
 
         seen_ids = [t.get("id") for t in hist if t.get("id")]
 

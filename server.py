@@ -312,6 +312,23 @@ async def faseyha_bml_logout(request: Request):
     return json_ok({"ok": True})
 
 
+@app.get("/faseyha/api/token")
+async def faseyha_token(request: Request):
+    """Return the saved BML access token (app-login protected)."""
+    if not app_authed(request):
+        return json_error(401, "Not authenticated")
+    auth = store.snapshot().get("auth") or {}
+    at = auth.get("access_token")
+    if not at:
+        return json_error(404, "No BML token saved — log in to BML first")
+    exp = auth.get("expires_at")
+    return json_ok({
+        "access_token": at,
+        "expires_at": exp,
+        "expires_in_sec": int(exp - time.time()) if exp else None,
+    })
+
+
 @app.post("/faseyha/api/settings")
 async def faseyha_settings(request: Request):
     if not app_authed(request):
@@ -436,6 +453,7 @@ if __name__ == "__main__":
     port = int(os.environ.get("PORT", "8000"))
     log(f"server starting on 0.0.0.0:{port}")
     # No request-handler timeout (handlers can run as long as the bank needs);
-    # generous keep-alive so a long upstream wait is never cut off mid-response.
+    # short keep-alive so idle inbound client sockets don't hoard buffers. This
+    # only governs idle time between requests; it never cuts an in-flight call.
     uvicorn.run(app, host="0.0.0.0", port=port,
-                timeout_keep_alive=3600, log_level="warning", access_log=False)
+                timeout_keep_alive=15, log_level="warning", access_log=False)

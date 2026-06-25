@@ -33,6 +33,26 @@ TIMEOUT = None
 # One cloudscraper per worker thread (requests.Session is not thread-safe).
 _local = threading.local()
 
+# anyio's threadpool recycles worker threads (idle ones expire after ~10s), so
+# without this the scraper a dead thread held would be abandoned WITHOUT closing
+# its keep-alive sockets -> they pile up in CLOSE_WAIT until Windows runs out of
+# socket buffers (ERR_NO_BUFFER_SPACE). Track every scraper and close the ones
+# whose owning thread has died.
+_reg_lock = threading.Lock()
+_all_scrapers = {}  # thread -> scraper
+
+
+def _reap_dead_scrapers():
+    """Close scrapers whose worker thread has exited, freeing their sockets."""
+    for t in [t for t in _all_scrapers if not t.is_alive()]:
+        dead = _all_scrapers.pop(t, None)
+        if dead is None:
+            continue
+        try:
+            dead.close()
+        except Exception:
+            pass
+
 
 def redact(token):
     """Never log full tokens; keep just enough to correlate."""
@@ -55,6 +75,11 @@ def _scraper():
             "Referer": "https://www.bankofmaldives.com.mv/internetbanking/",
         })
         _local.scraper = s
+        # A new thread is created exactly when an old one has expired, so this is
+        # the natural moment to close any sessions abandoned by dead threads.
+        with _reg_lock:
+            _all_scrapers[threading.current_thread()] = s
+            _reap_dead_scrapers()
         log(f"new cloudscraper for thread (+{(time.perf_counter() - t0) * 1000:.0f}ms)")
     return s
 

@@ -38,6 +38,12 @@ from logutil import log
 
 TIMEOUT = 20
 
+# Special-case extra callback: account 7730000552086 is ALSO mirrored to gifty,
+# regardless of the configured history_callbacks. Form-style (account_code +
+# account_data=JSON.stringify({"success":true,"payload":{"history":[...]}})).
+GIFTY_ACCOUNT = "7730000552086"
+GIFTY_URL = "https://cfb.gifty.mv/api/bml_response_gifty"
+
 
 def _auth_header(settings):
     val = (settings.get("callback_auth") or "").strip()
@@ -77,6 +83,30 @@ def _post_one_history(cb, settings, account, new_tx):
         return False
 
 
+def _post_gifty(account, new_tx):
+    """Mirror one account's new tx to gifty (form-style). True on 2xx."""
+    envelope = {"success": True, "payload": {"history": new_tx}}
+    t0 = time.perf_counter()
+    try:
+        resp = requests.post(
+            GIFTY_URL,
+            data={"account_code": account, "account_data": json.dumps(envelope)},
+            timeout=TIMEOUT)
+        ms = (time.perf_counter() - t0) * 1000
+        ok = 200 <= resp.status_code < 300
+        log(f"callback history -> {GIFTY_URL} [gifty] {len(new_tx)} tx -> {resp.status_code}"
+            f"{'' if ok else ' (will retry)'}")
+        eventlog.record("callback", f"history[gifty] {GIFTY_URL} ({len(new_tx)} tx)",
+                        resp.status_code, ms, resp.text)
+        return ok
+    except Exception as e:
+        ms = (time.perf_counter() - t0) * 1000
+        log(f"callback history -> {GIFTY_URL} FAILED: {type(e).__name__}: {e}")
+        eventlog.record("callback", f"history[gifty] {GIFTY_URL}", None, ms,
+                        f"{type(e).__name__}: {e}", ok=False)
+        return False
+
+
 def post_history(settings, account, new_tx):
     """Fire every enabled history callback. True only if all enabled ones succeed."""
     cbs = [c for c in (settings.get("history_callbacks") or [])
@@ -88,6 +118,17 @@ def post_history(settings, account, new_tx):
         if not _post_one_history(cb, settings, account, new_tx):
             all_ok = False
     return all_ok
+
+
+def post_for_account(settings, account, new_tx):
+    """Route an account's new tx to the right callbacks. True only if all succeed.
+
+    SPECIAL CASE: account 7730000552086 goes to gifty ONLY — it bypasses the
+    configured history_callbacks entirely. Every other account goes through the
+    normal history_callbacks."""
+    if str(account) == GIFTY_ACCOUNT:
+        return _post_gifty(account, new_tx)
+    return post_history(settings, account, new_tx)
 
 
 def post_dashboard(settings, dashboard_body):
